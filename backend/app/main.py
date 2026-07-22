@@ -31,16 +31,16 @@ app.add_middleware(
 )
 
 # Attach your individual modules to the FastAPI app shell
-app.include_router(alt_verse.router, prefix="/api/v1/altverse", tags=["AltVerse"])
-app.include_router(dream_architect.router, prefix="/api/v1/dream-architect", tags=["Dream Architect"])
+app.include_router(alt_verse.router, prefix="/altverse", tags=["AltVerse"])
+app.include_router(dream_architect.router, prefix="/dream-architect", tags=["Dream Architect"])
 
 @app.get("/")
 def read_root():
     return {"status": "online", "message": f"Welcome to the {settings.PROJECT_NAME} API Engine"}
 
-# --- MEDHA'S AI ENDPOINTS ---
+# --- AI ENDPOINTS ---
 
-@app.post("/api/legends/stream", tags=["Voice of Legends"])
+@app.post("/legends/stream", tags=["Voice of Legends"])
 async def chat_with_legend(payload: LegendChatRequest):
     """Routes client messages to the streaming engine loop"""
     generator = stream_legend_chat(
@@ -50,7 +50,7 @@ async def chat_with_legend(payload: LegendChatRequest):
     )
     return StreamingResponse(generator, media_type="text/plain")
 
-@app.post("/api/persona/analyze", response_model=PersonaAnalysis, tags=["PersonaX"])
+@app.post("/persona/analyze", response_model=PersonaAnalysis, tags=["PersonaX"])
 async def analyze_persona(payload: PersonaRequest):
     """Passes answers to the strict Pydantic parsing engine"""
     analysis_result = analyze_user_persona(

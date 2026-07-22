@@ -1,10 +1,11 @@
+import json
 from fastapi import APIRouter, HTTPException
 from app.models.dream_architect import DreamRequest, DreamResponse
 from app.services.gemini import gemini_service
 
 router = APIRouter()
 
-@router.post("/build-future", response_model=DreamResponse)
+@router.post("/generate", response_model=DreamResponse)
 async def build_future_roadmap(payload: DreamRequest):
     ai_prompt = f"""
     You are an elite career counselor and industry mentor for Dream Architect.
@@ -31,5 +32,22 @@ async def build_future_roadmap(payload: DreamRequest):
         ]
     }}
     """
-    ai_data = await gemini_service.generate_structured_response(ai_prompt)
-    return DreamResponse(**ai_data)
+    
+    try:
+        ai_data = await gemini_service.generate_structured_response(ai_prompt)
+        
+        # FIX: If Gemini returns a raw string, convert it to a dictionary
+        if isinstance(ai_data, str):
+            # Strip out markdown formatting if Gemini included ```json ... ```
+            clean_data = ai_data.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            ai_data = json.loads(clean_data)
+            
+        return DreamResponse(**ai_data)
+        
+    except Exception as e:
+        # If it crashes, this will print the EXACT reason to your backend terminal
+        print(f"\n--- BACKEND CRASH ---")
+        print(f"Error: {str(e)}")
+        print(f"Raw AI Data: {ai_data if 'ai_data' in locals() else 'None'}")
+        print(f"---------------------\n")
+        raise HTTPException(status_code=500, detail=str(e))
