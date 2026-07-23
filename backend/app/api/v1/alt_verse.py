@@ -1,6 +1,9 @@
+import json
+import traceback
 from fastapi import APIRouter, HTTPException
 from app.models.alt_verse import AltVerseRequest, AltVerseResponse
 from app.services.gemini import gemini_service
+from google.genai.errors import ClientError
 
 router = APIRouter()
 
@@ -40,5 +43,33 @@ async def generate_alt_timeline(payload: AltVerseRequest):
         }}
     }}
     """
-    ai_data = await gemini_service.generate_structured_response(ai_prompt)
-    return AltVerseResponse(**ai_data)
+    
+    try:
+        ai_data = await gemini_service.generate_structured_response(ai_prompt)
+
+        # Handle case where gemini_service returns a raw JSON string instead of a dictionary
+        if isinstance(ai_data, str):
+            ai_data = json.loads(ai_data)
+
+        return AltVerseResponse(**ai_data)
+
+    except ClientError as e:
+        print(f"[AltVerse API Error]: {e}")
+        if e.code == 429:
+            raise HTTPException(
+                status_code=429, 
+                detail="Rate limit reached for Gemini API. Please wait a moment and try again."
+            )
+        raise HTTPException(status_code=e.code or 500, detail=f"Gemini API error: {e.message}")
+
+    except json.JSONDecodeError as e:
+        print(f"[AltVerse JSON Decode Error]: {e}")
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to parse JSON structure from Gemini response."
+        )
+
+    except Exception as e:
+        print("[AltVerse General Exception Traceback]:")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

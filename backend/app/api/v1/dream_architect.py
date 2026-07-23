@@ -1,4 +1,5 @@
 import json
+import traceback
 from fastapi import APIRouter, HTTPException
 from app.models.dream_architect import DreamRequest, DreamResponse
 from app.services.gemini import gemini_service
@@ -36,18 +37,37 @@ async def build_future_roadmap(payload: DreamRequest):
     try:
         ai_data = await gemini_service.generate_structured_response(ai_prompt)
         
-        # FIX: If Gemini returns a raw string, convert it to a dictionary
+        # If Gemini returns a raw string or markdown string, parse it to a dictionary
         if isinstance(ai_data, str):
-            # Strip out markdown formatting if Gemini included ```json ... ```
-            clean_data = ai_data.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+            clean_data = (
+                ai_data.strip()
+                .removeprefix("```json")
+                .removeprefix("```")
+                .removesuffix("```")
+                .strip()
+            )
             ai_data = json.loads(clean_data)
             
         return DreamResponse(**ai_data)
-        
-    except Exception as e:
-        # If it crashes, this will print the EXACT reason to your backend terminal
-        print(f"\n--- BACKEND CRASH ---")
+
+    except HTTPException:
+        # Re-raise HTTPExceptions (e.g., 429 Rate Limit from gemini_service) as-is
+        raise
+
+    except json.JSONDecodeError as e:
+        print(f"\n--- DREAM ARCHITECT JSON DECODE ERROR ---")
         print(f"Error: {str(e)}")
         print(f"Raw AI Data: {ai_data if 'ai_data' in locals() else 'None'}")
-        print(f"---------------------\n")
+        print(f"-----------------------------------------\n")
+        raise HTTPException(
+            status_code=500, 
+            detail="Failed to parse structured JSON from Dream Architect response."
+        )
+
+    except Exception as e:
+        print(f"\n--- DREAM ARCHITECT BACKEND CRASH ---")
+        print(f"Error: {str(e)}")
+        print(f"Raw AI Data: {ai_data if 'ai_data' in locals() else 'None'}")
+        traceback.print_exc()
+        print(f"-------------------------------------\n")
         raise HTTPException(status_code=500, detail=str(e))

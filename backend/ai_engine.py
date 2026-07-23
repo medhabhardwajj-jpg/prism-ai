@@ -1,13 +1,18 @@
 import os
 import json
+import time
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 from pydantic import BaseModel, Field
 
 load_dotenv()
 client = genai.Client()
-MODEL_ID = "gemini-3.5-flash" 
+
+# Primary and fallback model strategy to survive free-tier rate limits
+PRIMARY_MODEL_ID = "gemini-3.5-flash" 
+FALLBACK_MODEL_ID = "gemini-3.5-flash-lite"  # Fallback if 3.5 hits 429 quota limits
 
 # 1. Load the Persona Matrix from our clean JSON file
 def load_personas():
@@ -19,9 +24,8 @@ LEGEND_PERSONAS = load_personas()
 def stream_legend_chat(character: str, user_message: str, history: list = None):
     """
     Streams the response chunk-by-chunk from the selected Legend character.
-    Accepts an optional 'history' array containing previous back-and-forth messages.
+    Handles 429 Rate Limits gracefully with automatic model failover and retries.
     """
-    # If this is the first message, history starts empty
     if history is None:
         history = []
         
@@ -31,37 +35,62 @@ def stream_legend_chat(character: str, user_message: str, history: list = None):
         "You are a helpful historical expert assistant."
     )
     
-    # 1. Convert raw history dictionaries into valid SDK Content models using types.Part(text=...)
+    # 1. Convert raw history dictionaries into valid SDK Content models
     formatted_contents = []
     for msg in history:
         formatted_contents.append(
             types.Content(
                 role=msg["role"], 
-                parts=[types.Part(text=msg["text"])]  # Explicitly wrapped with keyword argument
+                parts=[types.Part(text=msg["text"])]
             )
         )
         
-    # 2. Append the brand new user message to the end of the content array
+    # 2. Append user message
     formatted_contents.append(
         types.Content(
             role="user", 
-            parts=[types.Part(text=user_message)]  # Explicitly wrapped with keyword argument
+            parts=[types.Part(text=user_message)]
         )
     )
     
-    # 3. Pass the formatted contents array to the model streaming engine
-    response_stream = client.models.generate_content_stream(
-        model=MODEL_ID,
-        contents=formatted_contents,
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=0.7 
-        )
+    config = types.GenerateContentConfig(
+        system_instruction=system_instruction,
+        temperature=0.7 
     )
-    
-    for chunk in response_stream:
-        if chunk.text:
-            yield chunk.text
+
+    # 3. Stream response with error recovery & retry mechanism
+    max_retries = 3
+    models_to_try = [PRIMARY_MODEL_ID, FALLBACK_MODEL_ID]
+
+    for model_id in models_to_try:
+        for attempt in range(max_retries):
+            try:
+                response_stream = client.models.generate_content_stream(
+                    model=model_id,
+                    contents=formatted_contents,
+                    config=config
+                )
+                
+                # Consume the stream
+                for chunk in response_stream:
+                    if chunk.text:
+                        yield chunk.text
+                return  # Streaming completed successfully!
+
+            except ClientError as e:
+                if e.code == 429:
+                    # If this is the last attempt for the current model, fall through to try the next model
+                    if attempt < max_retries - 1:
+                        sleep_time = (2 ** attempt) + 1  # 3s, 5s backoff
+                        time.sleep(sleep_time)
+                        continue
+                else:
+                    # For non-429 client errors, yield the error directly to the stream without retrying
+                    yield f"\n[API Error ({e.code}): {e.message}]"
+                    return
+
+    # If all models and retries failed due to rate limits
+    yield "\n[Rate limit exceeded. The API is currently busy. Please wait a few seconds and try again.]"
 
 
 # 2. Define the exact JSON shape using strict nested models
@@ -82,6 +111,7 @@ class PersonaAnalysis(BaseModel):
 def analyze_user_persona(q1_motivation: str, q2_fear: str, q3_failure: str, q4_conflict: str, q5_adaptability: str) -> PersonaAnalysis:
     """
     Takes the user's questionnaire inputs and forces Gemini to return a strictly typed JSON object.
+    Includes a fallback model check for rate limit protection.
     """
     compiled_prompt = f"""
     Analyze the user's mindset based on their explicit answers to these five structural questions:
@@ -94,16 +124,23 @@ def analyze_user_persona(q1_motivation: str, q2_fear: str, q3_failure: str, q4_c
     Perform an assessment using the Big Five Personality traits and compile a clean archetype.
     """
     
-    # We pass the Pydantic schema into response_schema and demand application/json
-    response = client.models.generate_content(
-        model=MODEL_ID,
-        contents=compiled_prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=PersonaAnalysis,
-            temperature=0.2 # Lower temperature means highly deterministic, accurate JSON mapping
-        )
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=PersonaAnalysis,
+        temperature=0.2
     )
+
+    models_to_try = [PRIMARY_MODEL_ID, FALLBACK_MODEL_ID]
     
-    # The modern SDK auto-parses this directly into our Pydantic object via .parsed
-    return response.parsed
+    for model_id in models_to_try:
+        try:
+            response = client.models.generate_content(
+                model=model_id,
+                contents=compiled_prompt,
+                config=config
+            )
+            return response.parsed
+        except ClientError as e:
+            if e.code == 429 and model_id != models_to_try[-1]:
+                continue  # Try fallback model
+            raise e
