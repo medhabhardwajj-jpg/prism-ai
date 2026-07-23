@@ -26,9 +26,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy backend code into container root
 COPY backend/ .
 
-# Copy built static frontend files into both possible module search paths
+# Copy built static frontend files directly into /app/static
 COPY --from=frontend-builder /frontend/dist /app/static
-COPY --from=frontend-builder /frontend/dist /app/app/static
 
 EXPOSE 8000
 

@@ -63,7 +63,6 @@ async def analyze_persona(payload: PersonaRequest):
 
 # --- FRONTEND STATIC FILE MOUNTING ---
 
-# Search across all possible container paths relative to backend execution
 POSSIBLE_PATHS = [
     "/app/static",
     "/app/app/static",
@@ -75,46 +74,58 @@ POSSIBLE_PATHS = [
 ]
 
 STATIC_DIR = None
+INDEX_FILE = None
+
+# Priority 1: Search for the folder that actually contains index.html
 for p in POSSIBLE_PATHS:
-    if os.path.exists(p) and os.path.isdir(p):
+    test_index = os.path.join(p, "index.html")
+    if os.path.exists(test_index):
         STATIC_DIR = p
+        INDEX_FILE = test_index
         break
 
-print(f"=== DEBUG: STATIC_DIR RESOLVED TO -> {STATIC_DIR} ===")
+# Priority 2: Fallback to existing folder if index.html is missing
+if not STATIC_DIR:
+    for p in POSSIBLE_PATHS:
+        if os.path.exists(p) and os.path.isdir(p):
+            STATIC_DIR = p
+            INDEX_FILE = os.path.join(STATIC_DIR, "index.html")
+            break
 
-if STATIC_DIR:
-    INDEX_FILE = os.path.join(STATIC_DIR, "index.html")
+print(f"=== DEBUG: STATIC_DIR RESOLVED TO -> {STATIC_DIR} ===")
+print(f"=== DEBUG: INDEX_FILE RESOLVED TO -> {INDEX_FILE} ===")
+
+if STATIC_DIR and INDEX_FILE and os.path.exists(INDEX_FILE):
     assets_dir = os.path.join(STATIC_DIR, "assets")
 
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    # EXPLICIT ROOT ROUTE: Serves index.html directly on base path /
+    # EXPLICIT ROOT ROUTE: Direct "/" requests serve index.html
     @app.get("/", include_in_schema=False)
     async def serve_root():
-        if os.path.exists(INDEX_FILE):
-            return FileResponse(INDEX_FILE)
-        return {"error": f"index.html missing inside directory: {STATIC_DIR}"}
+        return FileResponse(INDEX_FILE)
 
-    # CATCH-ALL ROUTE: Handles Vite React SPA client routing
+    # CATCH-ALL ROUTE: Handles Vite React SPA client-side routes (e.g. /dashboard, /login)
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend(full_path: str):
-        # Exclude native API routes & interactive docs from SPA router
+        # Exclude native API routes & interactive docs from being caught by SPA router
         api_prefixes = ("docs", "redoc", "openapi.json", "altverse", "dream-architect", "legends", "persona")
         if full_path.startswith(api_prefixes):
             raise HTTPException(status_code=404, detail="Not Found")
 
-        # Serve static asset file directly if requested
+        # Serve static asset file directly if present
         requested_file = os.path.join(STATIC_DIR, full_path)
         if full_path and os.path.exists(requested_file) and os.path.isfile(requested_file):
             return FileResponse(requested_file)
 
-        # Fallback to index.html for client-side routes
-        if os.path.exists(INDEX_FILE):
-            return FileResponse(INDEX_FILE)
-
-        return {"error": "Frontend build assets missing"}
+        # Fallback to index.html for SPA client-side routing
+        return FileResponse(INDEX_FILE)
 else:
     @app.get("/")
     def read_root():
-        return {"status": "online", "message": f"Welcome to the {settings.PROJECT_NAME} API Engine (STATIC DIR NOT FOUND)"}
+        return {
+            "status": "online", 
+            "message": f"Welcome to the {settings.PROJECT_NAME} API Engine",
+            "debug_static_dir": STATIC_DIR
+        }
