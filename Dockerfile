@@ -30,8 +30,7 @@ COPY backend/ .
 RUN mkdir -p /app/static
 
 # Copy build output whether created by Vite (dist) or CRA (build)
-COPY --from=frontend-builder /frontend/dist* /app/static/
-COPY --from=frontend-builder /frontend/build* /app/static/
+COPY --from=frontend-builder /frontend/dist/public/ /app/static/
 
 EXPOSE 8000
 
