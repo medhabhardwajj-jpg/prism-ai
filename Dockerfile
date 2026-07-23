@@ -1,4 +1,4 @@
-# --- Stage 1: Build Frontend ---
+# --- Stage 1: Build Frontend (Vite) ---
 FROM node:20-alpine AS frontend-builder
 WORKDIR /frontend
 
@@ -29,7 +29,7 @@ COPY backend/ .
 # Create target static folder
 RUN mkdir -p /app/static
 
-# Copy build output whether created by Vite (dist) or CRA (build)
+# Copy build output generated at dist/public by vite.config.ts directly into /app/static/
 COPY --from=frontend-builder /frontend/dist/public/ /app/static/
 
 EXPOSE 8000

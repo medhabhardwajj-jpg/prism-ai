@@ -33,13 +33,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Attach modules
+# Attach individual modules with both direct and /api prefixes
 app.include_router(alt_verse.router, prefix="/altverse", tags=["AltVerse"])
-app.include_router(dream_architect.router, prefix="/dream-architect", tags=["Dream Architect"])
+app.include_router(alt_verse.router, prefix="/api/altverse", tags=["AltVerse"])
 
-# --- AI ENDPOINTS ---
+app.include_router(dream_architect.router, prefix="/dream-architect", tags=["Dream Architect"])
+app.include_router(dream_architect.router, prefix="/api/dream-architect", tags=["Dream Architect"])
+
+# --- AI ENDPOINTS (Explicit support for both /api/ and root paths) ---
 
 @app.post("/legends/stream", tags=["Voice of Legends"])
+@app.post("/api/legends/stream", tags=["Voice of Legends"])
 async def chat_with_legend(payload: LegendChatRequest):
     """Routes client messages to the streaming engine loop"""
     generator = stream_legend_chat(
@@ -50,6 +54,7 @@ async def chat_with_legend(payload: LegendChatRequest):
     return StreamingResponse(generator, media_type="text/plain")
 
 @app.post("/persona/analyze", response_model=PersonaAnalysis, tags=["PersonaX"])
+@app.post("/api/persona/analyze", response_model=PersonaAnalysis, tags=["PersonaX"])
 async def analyze_persona(payload: PersonaRequest):
     """Passes answers to the strict Pydantic parsing engine"""
     analysis_result = analyze_user_persona(
@@ -78,7 +83,7 @@ POSSIBLE_PATHS = [
 STATIC_DIR = None
 INDEX_FILE = None
 
-# Search paths for index.html
+# Scan candidates for index.html existence
 for p in POSSIBLE_PATHS:
     test_index = os.path.join(p, "index.html")
     if os.path.exists(test_index):
@@ -86,16 +91,13 @@ for p in POSSIBLE_PATHS:
         INDEX_FILE = test_index
         break
 
-print(f"=== DEBUG: STATIC_DIR RESOLVED TO -> {STATIC_DIR} ===")
-print(f"=== DEBUG: INDEX_FILE RESOLVED TO -> {INDEX_FILE} ===")
-
 if STATIC_DIR and INDEX_FILE and os.path.exists(INDEX_FILE):
     assets_dir = os.path.join(STATIC_DIR, "assets")
 
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    # Serve index.html on root
+    # Serve index.html on root route
     @app.get("/", include_in_schema=False)
     async def serve_root():
         return FileResponse(INDEX_FILE)
@@ -103,9 +105,10 @@ if STATIC_DIR and INDEX_FILE and os.path.exists(INDEX_FILE):
     # Catch-all route for SPA client routing
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend(full_path: str):
-        api_prefixes = ("docs", "redoc", "openapi.json", "altverse", "dream-architect", "legends", "persona")
+        # Exclude API calls so missing/failed endpoints yield proper API responses instead of index.html
+        api_prefixes = ("api", "docs", "redoc", "openapi.json", "altverse", "dream-architect", "legends", "persona")
         if full_path.startswith(api_prefixes):
-            raise HTTPException(status_code=404, detail="Not Found")
+            raise HTTPException(status_code=404, detail="API route not found")
 
         requested_file = os.path.join(STATIC_DIR, full_path)
         if full_path and os.path.exists(requested_file) and os.path.isfile(requested_file):
@@ -115,18 +118,9 @@ if STATIC_DIR and INDEX_FILE and os.path.exists(INDEX_FILE):
 else:
     @app.get("/")
     def read_root():
-        def inspect_dir(path):
-            if os.path.exists(path):
-                try:
-                    return os.listdir(path)
-                except Exception as e:
-                    return str(e)
-            return "DIR_DOES_NOT_EXIST"
-
         return {
             "status": "online", 
             "message": f"Welcome to the {settings.PROJECT_NAME} API Engine",
             "error": "index.html not found inside any candidate static directory",
-            "app_directory_contents": inspect_dir("/app"),
-            "static_directory_contents": inspect_dir("/app/static")
+            "debug_checked_paths": POSSIBLE_PATHS
         }
