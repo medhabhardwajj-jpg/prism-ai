@@ -63,28 +63,42 @@ async def analyze_persona(payload: PersonaRequest):
 
 # --- FRONTEND STATIC FILE MOUNTING ---
 
-STATIC_DIR = os.path.abspath("static")
-INDEX_FILE = os.path.join(STATIC_DIR, "index.html")
+# Search dynamically across possible static folder locations
+POSSIBLE_PATHS = [
+    os.path.abspath("static"),
+    os.path.abspath("../static"),
+    os.path.join(os.path.dirname(__file__), "static"),
+    os.path.join(os.path.dirname(__file__), "..", "static"),
+    "/app/static",
+    "/app/app/static"
+]
 
-# Mount assets directory if present
-if os.path.exists(STATIC_DIR):
+STATIC_DIR = None
+for p in POSSIBLE_PATHS:
+    if os.path.exists(p) and os.path.isdir(p):
+        STATIC_DIR = p
+        break
+
+if STATIC_DIR:
+    INDEX_FILE = os.path.join(STATIC_DIR, "index.html")
     assets_dir = os.path.join(STATIC_DIR, "assets")
+
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        # Allow OpenAPI documentation and native endpoints to pass through
-        api_prefixes = ("docs", "redoc", "openapi.json")
+        # Exclude native API routes & interactive docs from being caught by SPA router
+        api_prefixes = ("docs", "redoc", "openapi.json", "altverse", "dream-architect", "legends", "persona")
         if full_path.startswith(api_prefixes):
             raise HTTPException(status_code=404, detail="Not Found")
 
-        # Serve static asset file if requested file exists
+        # Serve static asset file if requested file directly exists
         requested_file = os.path.join(STATIC_DIR, full_path)
         if full_path and os.path.exists(requested_file) and os.path.isfile(requested_file):
             return FileResponse(requested_file)
 
-        # Serve index.html for frontend client routing if available
+        # Serve React/Vite index.html SPA entrypoint
         if os.path.exists(INDEX_FILE):
             return FileResponse(INDEX_FILE)
 
