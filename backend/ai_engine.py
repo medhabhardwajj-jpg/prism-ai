@@ -4,27 +4,30 @@ import time
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
-from google.genai.errors import ClientError
+from google.genai.errors import ClientError, ServerError, APIError
 from pydantic import BaseModel, Field
 
 load_dotenv()
 client = genai.Client()
 
-# Primary and fallback model strategy to survive free-tier rate limits
-PRIMARY_MODEL_ID = "gemini-3.5-flash" 
-FALLBACK_MODEL_ID = "gemini-3.5-flash-lite"  # Fallback if 3.5 hits 429 quota limits
+# Primary and fallback models (Valid Google Gemini Models)
+PRIMARY_MODEL_ID = "gemini-2.5-flash" 
+FALLBACK_MODEL_ID = "gemini-2.0-flash"
 
 # 1. Load the Persona Matrix from our clean JSON file
 def load_personas():
-    with open("personas.json", "r") as file:
-        return json.load(file)
+    try:
+        with open("personas.json", "r") as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return {}
 
 LEGEND_PERSONAS = load_personas()
 
 def stream_legend_chat(character: str, user_message: str, history: list = None):
     """
     Streams the response chunk-by-chunk from the selected Legend character.
-    Handles 429 Rate Limits gracefully with automatic model failover and retries.
+    Handles 429 Rate Limits and 503 Capacity Errors gracefully with automatic failover.
     """
     if history is None:
         history = []
@@ -35,8 +38,7 @@ def stream_legend_chat(character: str, user_message: str, history: list = None):
         "You are a helpful historical expert assistant."
     )
     
-    # 1. Convert raw history dictionaries into valid SDK Content models
-    # Normalize 'assistant' (or any non-user role) to 'model' for Gemini SDK
+    # Convert raw history dictionaries into valid SDK Content models
     formatted_contents = []
     for msg in history:
         role = "model" if msg.get("role") in ["assistant", "model"] else "user"
@@ -47,7 +49,7 @@ def stream_legend_chat(character: str, user_message: str, history: list = None):
             )
         )
         
-    # 2. Append user message
+    # Append current user message
     formatted_contents.append(
         types.Content(
             role="user", 
@@ -60,9 +62,8 @@ def stream_legend_chat(character: str, user_message: str, history: list = None):
         temperature=0.7 
     )
 
-    # 3. Stream response with error recovery & retry mechanism
     max_retries = 3
-    models_to_try = [PRIMARY_MODEL_ID, FALLBACK_MODEL_ID]
+    models_to_try = [PRIMARY_MODEL_ID, FALLBACK_MODEL_ID, "gemini-1.5-flash"]
 
     for model_id in models_to_try:
         for attempt in range(max_retries):
@@ -73,26 +74,29 @@ def stream_legend_chat(character: str, user_message: str, history: list = None):
                     config=config
                 )
                 
-                # Consume the stream
+                # Consume and yield the stream
                 for chunk in response_stream:
                     if chunk.text:
                         yield chunk.text
-                return  # Streaming completed successfully!
+                return  # Stream completed successfully!
 
-            except ClientError as e:
-                if e.code == 429:
-                    # If this is the last attempt for the current model, fall through to try the next model
+            # Catch BOTH Rate Limit (429) AND Server Capacity (500/503) errors
+            except (ServerError, APIError, ClientError) as e:
+                status_code = getattr(e, 'code', None) or getattr(e, 'status_code', 500)
+                
+                # Retryable status codes (Rate limits or high traffic)
+                if status_code in [429, 500, 502, 503, 504]:
                     if attempt < max_retries - 1:
-                        sleep_time = (2 ** attempt) + 1  # 3s, 5s backoff
+                        sleep_time = (2 ** attempt) + 1  # Exponential backoff (3s, 5s...)
                         time.sleep(sleep_time)
                         continue
                 else:
-                    # For non-429 client errors, yield the error directly to the stream without retrying
-                    yield f"\n[API Error ({e.code}): {e.message}]"
+                    # Non-retryable errors (e.g. 400 Bad Request, 403 Forbidden)
+                    yield f"\n[API Error ({status_code}): {str(e)}]"
                     return
 
-    # If all models and retries failed due to rate limits
-    yield "\n[Rate limit exceeded. The API is currently busy. Please wait a few seconds and try again.]"
+    # If all models and retries failed
+    yield "\n[The AI server is currently experiencing high demand. Please try again in a few seconds.]"
 
 
 # 2. Define the exact JSON shape using strict nested models
@@ -113,7 +117,7 @@ class PersonaAnalysis(BaseModel):
 def analyze_user_persona(q1_motivation: str, q2_fear: str, q3_failure: str, q4_conflict: str, q5_adaptability: str) -> PersonaAnalysis:
     """
     Takes the user's questionnaire inputs and forces Gemini to return a strictly typed JSON object.
-    Includes a fallback model check for rate limit protection.
+    Includes a fallback model check for rate limit and server busy protection.
     """
     compiled_prompt = f"""
     Analyze the user's mindset based on their explicit answers to these five structural questions:
@@ -132,17 +136,22 @@ def analyze_user_persona(q1_motivation: str, q2_fear: str, q3_failure: str, q4_c
         temperature=0.2
     )
 
-    models_to_try = [PRIMARY_MODEL_ID, FALLBACK_MODEL_ID]
+    models_to_try = [PRIMARY_MODEL_ID, FALLBACK_MODEL_ID, "gemini-1.5-flash"]
+    last_exception = None
     
     for model_id in models_to_try:
-        try:
-            response = client.models.generate_content(
-                model=model_id,
-                contents=compiled_prompt,
-                config=config
-            )
-            return response.parsed
-        except ClientError as e:
-            if e.code == 429 and model_id != models_to_try[-1]:
-                continue  # Try fallback model
-            raise e
+        for attempt in range(2):
+            try:
+                response = client.models.generate_content(
+                    model=model_id,
+                    contents=compiled_prompt,
+                    config=config
+                )
+                return response.parsed
+            except (ServerError, APIError, ClientError) as e:
+                last_exception = e
+                time.sleep(1)
+                continue  # Try retry or next model
+            
+    # Raise the last caught exception if all models fail
+    raise last_exception
