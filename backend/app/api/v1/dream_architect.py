@@ -1,4 +1,5 @@
 import json
+import re
 import traceback
 from fastapi import APIRouter, HTTPException
 from app.models.dream_architect import DreamRequest, DreamResponse
@@ -6,14 +7,17 @@ from app.services.gemini import gemini_service
 
 router = APIRouter()
 
+# Register multiple endpoint paths to prevent routing mismatches from the frontend
 @router.post("/generate", response_model=DreamResponse)
+@router.post("/compute", response_model=DreamResponse)
+@router.post("/", response_model=DreamResponse)
 async def build_future_roadmap(payload: DreamRequest):
     ai_prompt = f"""
     You are an elite career counselor and industry mentor for Dream Architect.
     Build a comprehensive, highly personalized step-by-step professional roadmap to transition from studying '{payload.current_study}' to becoming a '{payload.target_dream}'.
     
     The steps must be highly technical, specific, actionable, and detailed like a thorough career coach.
-    You MUST respond with a single JSON object matching this exact schema structure:
+    You MUST respond ONLY with a single valid JSON object matching this exact schema structure (no conversational preamble or postscript):
     {{
         "target_dream": "{payload.target_dream}",
         "current_study": "{payload.current_study}",
@@ -37,21 +41,26 @@ async def build_future_roadmap(payload: DreamRequest):
     try:
         ai_data = await gemini_service.generate_structured_response(ai_prompt)
         
-        # If Gemini returns a raw string or markdown string, parse it to a dictionary
+        # If Gemini returns a string, robustly extract JSON block using regex
         if isinstance(ai_data, str):
-            clean_data = (
-                ai_data.strip()
-                .removeprefix("```json")
-                .removeprefix("```")
-                .removesuffix("```")
-                .strip()
-            )
+            # Extract JSON payload between curly braces
+            json_match = re.search(r"\{.*\}", ai_data, re.DOTALL)
+            if json_match:
+                clean_data = json_match.group(0)
+            else:
+                clean_data = (
+                    ai_data.strip()
+                    .removeprefix("```json")
+                    .removeprefix("```")
+                    .removesuffix("```")
+                    .strip()
+                )
             ai_data = json.loads(clean_data)
             
         return DreamResponse(**ai_data)
 
     except HTTPException:
-        # Re-raise HTTPExceptions (e.g., 429 Rate Limit from gemini_service) as-is
+        # Re-raise HTTPExceptions as-is
         raise
 
     except json.JSONDecodeError as e:
