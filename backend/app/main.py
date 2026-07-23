@@ -1,5 +1,5 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
@@ -63,29 +63,33 @@ async def analyze_persona(payload: PersonaRequest):
 
 # --- FRONTEND STATIC FILE MOUNTING ---
 
-# Mount static folder (JS/CSS/Assets built by Vite)
-if os.path.exists("static"):
-    # Mount built Vite assets subfolder
-    if os.path.exists("static/assets"):
-        app.mount("/assets", StaticFiles(directory="static/assets"), name="assets")
+STATIC_DIR = os.path.abspath("static")
+INDEX_FILE = os.path.join(STATIC_DIR, "index.html")
 
-    # Catch-all route to serve static files or fall back to index.html for Vite Client-side Routing
+# Mount assets directory if present
+if os.path.exists(STATIC_DIR):
+    assets_dir = os.path.join(STATIC_DIR, "assets")
+    if os.path.exists(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        # Exclude documentation and API routes so FastAPI endpoints continue to work normally
-        api_prefixes = ("docs", "redoc", "openapi.json", "altverse", "dream-architect", "legends", "persona")
+        # Allow OpenAPI documentation and native endpoints to pass through
+        api_prefixes = ("docs", "redoc", "openapi.json")
         if full_path.startswith(api_prefixes):
-            return None
+            raise HTTPException(status_code=404, detail="Not Found")
 
-        # Check if the requested asset/file exists inside static directory
-        file_path = os.path.join("static", full_path)
-        if full_path and os.path.exists(file_path) and os.path.isfile(file_path):
-            return FileResponse(file_path)
+        # Serve static asset file if requested file exists
+        requested_file = os.path.join(STATIC_DIR, full_path)
+        if full_path and os.path.exists(requested_file) and os.path.isfile(requested_file):
+            return FileResponse(requested_file)
 
-        # Fallback to index.html for Single Page Application (SPA) routing
-        return FileResponse("static/index.html")
+        # Serve index.html for frontend client routing if available
+        if os.path.exists(INDEX_FILE):
+            return FileResponse(INDEX_FILE)
+
+        return {"status": "online", "message": f"Welcome to the {settings.PROJECT_NAME} API Engine"}
 else:
-    # Fallback status message if static folder is missing
     @app.get("/")
     def read_root():
         return {"status": "online", "message": f"Welcome to the {settings.PROJECT_NAME} API Engine"}

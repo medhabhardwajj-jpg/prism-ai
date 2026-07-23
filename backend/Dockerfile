@@ -1,5 +1,4 @@
 # --- Stage 1: Build Frontend (Vite) ---
-# FIX: Upgrade Node version from 18 to 20/22
 FROM node:20-alpine AS frontend-builder
 WORKDIR /frontend
 
@@ -20,13 +19,13 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # Copy backend requirements and install
-COPY backend/requirements.txt .
+COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend code
-COPY backend/ .
+# Copy all backend files maintaining directory structure
+COPY backend/ ./app
 
-# Copy built static frontend files from Stage 1 into /app/static
+# Copy built static frontend assets into /app/static for FastAPI
 COPY --from=frontend-builder /frontend/dist /app/static
 
 EXPOSE 8000
