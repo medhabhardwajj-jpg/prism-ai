@@ -36,12 +36,14 @@ def stream_legend_chat(character: str, user_message: str, history: list = None):
     )
     
     # 1. Convert raw history dictionaries into valid SDK Content models
+    # Normalize 'assistant' (or any non-user role) to 'model' for Gemini SDK
     formatted_contents = []
     for msg in history:
+        role = "model" if msg.get("role") in ["assistant", "model"] else "user"
         formatted_contents.append(
             types.Content(
-                role=msg["role"], 
-                parts=[types.Part(text=msg["text"])]
+                role=role, 
+                parts=[types.Part(text=msg.get("text", msg.get("content", "")))]
             )
         )
         
