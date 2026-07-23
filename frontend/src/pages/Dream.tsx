@@ -42,8 +42,8 @@ export default function Dream() {
     setResult(null);
     
     try {
-      // Hardcoded absolute URL to hit the FastAPI backend directly on port 8000
-      const res = await fetch(`http://localhost:8000/dream-architect/generate`,{
+      // ✅ FIX: Changed hardcoded localhost:8000 to a relative API path
+      const res = await fetch(`/api/dream-architect/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
