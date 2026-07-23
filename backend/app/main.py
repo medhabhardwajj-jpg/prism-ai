@@ -33,7 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Attach your individual modules to the FastAPI app shell
+# Attach modules
 app.include_router(alt_verse.router, prefix="/altverse", tags=["AltVerse"])
 app.include_router(dream_architect.router, prefix="/dream-architect", tags=["Dream Architect"])
 
@@ -63,7 +63,6 @@ async def analyze_persona(payload: PersonaRequest):
 
 # --- FRONTEND STATIC FILE MOUNTING ---
 
-# Candidate directories including possible nested Vite build outputs
 POSSIBLE_PATHS = [
     "/app/static",
     "/app/static/dist",
@@ -79,7 +78,7 @@ POSSIBLE_PATHS = [
 STATIC_DIR = None
 INDEX_FILE = None
 
-# Scan candidates for index.html existence
+# Search paths for index.html
 for p in POSSIBLE_PATHS:
     test_index = os.path.join(p, "index.html")
     if os.path.exists(test_index):
@@ -96,7 +95,7 @@ if STATIC_DIR and INDEX_FILE and os.path.exists(INDEX_FILE):
     if os.path.exists(assets_dir):
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    # Serve index.html on root route
+    # Serve index.html on root
     @app.get("/", include_in_schema=False)
     async def serve_root():
         return FileResponse(INDEX_FILE)
@@ -116,9 +115,18 @@ if STATIC_DIR and INDEX_FILE and os.path.exists(INDEX_FILE):
 else:
     @app.get("/")
     def read_root():
+        def inspect_dir(path):
+            if os.path.exists(path):
+                try:
+                    return os.listdir(path)
+                except Exception as e:
+                    return str(e)
+            return "DIR_DOES_NOT_EXIST"
+
         return {
             "status": "online", 
             "message": f"Welcome to the {settings.PROJECT_NAME} API Engine",
             "error": "index.html not found inside any candidate static directory",
-            "debug_checked_paths": POSSIBLE_PATHS
+            "app_directory_contents": inspect_dir("/app"),
+            "static_directory_contents": inspect_dir("/app/static")
         }
