@@ -11,8 +11,8 @@ load_dotenv()
 client = genai.Client()
 
 # Primary and fallback models (Valid Google Gemini Models)
-PRIMARY_MODEL_ID = "gemini-2.5-flash" 
-FALLBACK_MODEL_ID = "gemini-2.0-flash"
+PRIMARY_MODEL_ID = "gemini-3.6-flash" 
+FALLBACK_MODEL_ID = "gemini-3.5-flash-lite"
 
 # 1. Load the Persona Matrix from our clean JSON file
 def load_personas():
@@ -136,7 +136,7 @@ def analyze_user_persona(q1_motivation: str, q2_fear: str, q3_failure: str, q4_c
         temperature=0.2
     )
 
-    models_to_try = [PRIMARY_MODEL_ID, FALLBACK_MODEL_ID, "gemini-1.5-flash"]
+    models_to_try = [PRIMARY_MODEL_ID, FALLBACK_MODEL_ID, "gemini-3.5-flash"]
     last_exception = None
     
     for model_id in models_to_try:
