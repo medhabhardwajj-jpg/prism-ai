@@ -1,5 +1,6 @@
 # --- Stage 1: Build Frontend (Vite) ---
-FROM node:18-alpine AS frontend-builder
+# FIX: Upgrade Node version from 18 to 20/22
+FROM node:20-alpine AS frontend-builder
 WORKDIR /frontend
 
 # Copy frontend package files and install dependencies
