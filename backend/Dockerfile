@@ -17,12 +17,14 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+# Fix: Ensure Python includes /app in its module search path
+ENV PYTHONPATH=/app
 
 # Copy backend requirements and install
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all files inside backend/ directly into WORKDIR (/app)
+# Copy backend contents into /app
 COPY backend/ .
 
 # Copy built static frontend assets into /app/static for FastAPI
@@ -30,5 +32,5 @@ COPY --from=frontend-builder /frontend/dist /app/static
 
 EXPOSE 8000
 
-# Fix: Change app.main:app -> main:app
-CMD ["sh", "-c", "python -m uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Fix: Target app.main:app explicitly
+CMD ["sh", "-c", "python -m uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
